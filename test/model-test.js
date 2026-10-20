@@ -170,6 +170,23 @@ check("waitingFilesSummary names a single file",
 check("waitingFilesSummary counts several files and adds up their size",
   M.waitingFilesSummary(M.parseWaitingFiles(waitingRaw)), "2 files · 2.0 MB")
 
+const firstPoll = M.diffWaitingFiles([{ name: "a.txt", size: 1 }, { name: "b.txt", size: 2 }], {})
+check("diffWaitingFiles: everything is fresh the first time",
+  firstPoll.fresh.map(f => f.name), ["a.txt", "b.txt"])
+const secondPoll = M.diffWaitingFiles([{ name: "a.txt", size: 1 }, { name: "b.txt", size: 2 }, { name: "c.txt", size: 3 }], firstPoll.seen)
+check("diffWaitingFiles: only the new arrival is fresh", secondPoll.fresh.map(f => f.name), ["c.txt"])
+const afterSave = M.diffWaitingFiles([], secondPoll.seen)
+check("diffWaitingFiles: an emptied inbox forgets what it saw", afterSave.seen, {})
+check("diffWaitingFiles: a name that comes back after saving is fresh again",
+  M.diffWaitingFiles([{ name: "a.txt", size: 1 }], afterSave.seen).fresh.length, 1)
+check("diffWaitingFiles tolerates a missing list", M.diffWaitingFiles(undefined, undefined), { fresh: [], seen: {} })
+
+check("waitingFilesNotice names a single file",
+  M.waitingFilesNotice([{ name: "notes.pdf", size: 1 }]),
+  { headline: "Received notes.pdf", body: "Waiting in the Taildrop inbox. Click to save it" })
+check("waitingFilesNotice counts several files",
+  M.waitingFilesNotice([{ name: "a", size: 1 }, { name: "b", size: 1 }]).headline, "Received 2 files")
+
 check("parseUnitState: enabled and running",
   M.parseUnitState("LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n"),
   { loaded: true, enabled: true, active: true })

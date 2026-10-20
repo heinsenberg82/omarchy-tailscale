@@ -17,6 +17,7 @@ Panel {
   // handler uses a target of its own and calls straight into the panel, which
   // makes the widget scriptable and bindable to a hotkey.
   IpcHandler {
+    id: pluginIpc
     target: "igor-alexandrov.tailscale"
     enabled: true
     function open(): void { root.open() }
@@ -24,6 +25,7 @@ Panel {
     function toggle(): void { root.toggle() }
     function isOpen(): string { return root.opened ? "open" : "closed" }
     function adminConsole(): void { root.openAdminConsole() }
+    function saveFiles(): void { root.saveWaitingFiles() }
   }
 
   property string focusSection: "header"
@@ -449,6 +451,7 @@ Panel {
   Service {
     id: tailscale
     settings: root.settings
+    pluginIpcTarget: pluginIpc.target
   }
 
   Connections {
@@ -485,6 +488,7 @@ Panel {
           badgeColor: root.urgent
           crossed: !tailscale.active && !tailscale.needsLogin
           warning: tailscale.needsLogin
+          filesWaiting: tailscale.waitingFiles.length > 0
         }
       }
     }

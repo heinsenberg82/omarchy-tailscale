@@ -8,6 +8,9 @@ Item {
   id: root
 
   property var settings: ({})
+  // The panel's own IPC target, which a click on the arrival notification
+  // calls back into to save the files.
+  property string pluginIpcTarget: ""
 
   property bool installed: false
   property bool running: false
@@ -54,6 +57,9 @@ Item {
   readonly property bool settingAutoReceive: receiveServiceProcess.running
   readonly property bool savingFiles: folderPickerProcess.running || fileGetProcess.running
   readonly property string waitingFilesSummary: Model.waitingFilesSummary(waitingFiles)
+  // With Omarchy's receiver on, the inbox drains on its own and the receiver
+  // announces every file itself, so there is nothing to watch for.
+  readonly property bool watchInbox: installed && fileSharing && !autoReceive
   readonly property string userName: Quickshell.env("USER") || Quickshell.env("LOGNAME")
   readonly property string homeDir: Quickshell.env("HOME") || ""
 
@@ -88,6 +94,9 @@ Item {
   property string _fileGetOutput: ""
   property string _fileGetError: ""
   property string _saveDir: ""
+  property var _seenWaitingFiles: ({})
+
+  onWatchInboxChanged: syncInboxWatcher()
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -168,13 +177,33 @@ Item {
     Quickshell.execDetached(["omarchy-tailscale-send", target])
   }
 
-  function notify(headline, body, critical, openPath) {
+  function notify(headline, body, urgency, onClick) {
     var args = ["omarchy-notification-send", "-g", "󰒊"]
-    if (critical === true) args.push("-u", "critical")
+    if (urgency) args.push("-u", urgency)
     args.push(headline)
     if (body) args.push(body)
-    if (openPath) args.push("--exec", "xdg-open", openPath)
+    // --exec takes the rest of the line as the click command, so it goes last.
+    if (onClick && onClick.length > 0) args = args.concat(["--exec"], onClick)
     Quickshell.execDetached(args)
+  }
+
+  function announceWaitingFiles(files) {
+    var diff = Model.diffWaitingFiles(files, _seenWaitingFiles)
+    _seenWaitingFiles = diff.seen
+    if (diff.fresh.length === 0 || autoReceive) return
+    var notice = Model.waitingFilesNotice(diff.fresh)
+    notify(notice.headline, notice.body, "normal", pluginIpcTarget !== "" ? ["omarchy-shell", "-q", pluginIpcTarget, "saveFiles"] : [])
+  }
+
+  function syncInboxWatcher() {
+    if (watchInbox && !inboxWatchProcess.running) {
+      // Peer updates are most of what the bus carries and none of them matter
+      // here, so leave them out rather than parse past them.
+      inboxWatchProcess.command = ["tailscale", "debug", "watch-ipn", "--peer-changes=false", "--peer-patches=false"]
+      inboxWatchProcess.running = true
+    } else if (!watchInbox && inboxWatchProcess.running) {
+      inboxWatchProcess.running = false
+    }
   }
 
   function setAutoReceive(on) {
@@ -248,15 +277,7 @@ Item {
       accountsProcess.running = true
       launched = true
     }
-    if (!waitingFilesProcess.running) {
-      _waitingFilesOutput = ""
-      _waitingFilesError = ""
-      // `tailscale file` has no way to list the inbox without emptying it; the
-      // debug command is the only read-only view the CLI offers.
-      waitingFilesProcess.command = ["tailscale", "debug", "--file", "get"]
-      waitingFilesProcess.running = true
-      launched = true
-    }
+    if (refreshWaitingFiles()) launched = true
     if (!receiveStateProcess.running) {
       _receiveStateOutput = ""
       _receiveStateError = ""
@@ -269,6 +290,20 @@ Item {
     // process forever once the refresh interval is shorter than the timeout,
     // and refreshIntervalSec goes down to five seconds.
     if (launched && !pollWatchdog.running) pollWatchdog.start()
+  }
+
+  // Also run on its own when the bus says files arrived, so it arms the
+  // watchdog itself instead of relying on refreshStatusAndAccounts to.
+  function refreshWaitingFiles() {
+    if (!installed || waitingFilesProcess.running) return false
+    _waitingFilesOutput = ""
+    _waitingFilesError = ""
+    // `tailscale file` has no way to list the inbox without emptying it; the
+    // debug command is the only read-only view the CLI offers.
+    waitingFilesProcess.command = ["tailscale", "debug", "--file", "get"]
+    waitingFilesProcess.running = true
+    if (!pollWatchdog.running) pollWatchdog.start()
+    return true
   }
 
   function elideStatus(text) {
@@ -729,7 +764,41 @@ Item {
       var files = exitCode === 0 ? Model.parseWaitingFiles(stdout) : null
       root.waitingFilesKnown = files !== null
       root.waitingFiles = files || []
+      if (files !== null) root.announceWaitingFiles(files)
     }
+  }
+
+  // A long-running subscription to tailscaled's message bus, the same signal
+  // `tailscale file get --wait` waits on, so an arrival is announced at once
+  // instead of on the next poll. It is not a poll, so it stays out of `busy`
+  // and the watchdog; polling still catches anything it misses.
+  Process {
+    id: inboxWatchProcess
+    running: false
+    command: []
+    stdout: SplitParser {
+      onRead: function(data) {
+        if (String(data).indexOf("\"FilesWaiting\"") !== -1 && !inboxWatchDebounce.running) inboxWatchDebounce.start()
+      }
+    }
+    onExited: if (root.watchInbox) inboxWatchRestart.restart()
+  }
+
+  Timer {
+    // A transfer in progress repeats FilesWaiting with every progress update
+    // while earlier files sit in the inbox; look at most once a second.
+    id: inboxWatchDebounce
+    interval: 1000
+    repeat: false
+    onTriggered: root.refreshWaitingFiles()
+  }
+
+  Timer {
+    // The watch ends whenever tailscaled restarts.
+    id: inboxWatchRestart
+    interval: 10000
+    repeat: false
+    onTriggered: root.syncInboxWatcher()
   }
 
   Process {
@@ -779,7 +848,7 @@ Item {
       // 1 is the chooser closing with nothing picked, which is a decision, not
       // a fault. Anything above it means the chooser never ran.
       if (exitCode === 0 && dir !== "") root.getWaitingFiles(dir)
-      else if (exitCode > 1) root.notify("Could not save Taildrop files", "The folder chooser did not open", true, "")
+      else if (exitCode > 1) root.notify("Could not save Taildrop files", "The folder chooser did not open", "critical", [])
     }
   }
 
@@ -793,10 +862,10 @@ Item {
       var stdout = String(fileGetStdout.text || root._fileGetOutput || "")
       var stderr = String(fileGetStderr.text || root._fileGetError || "")
       if (exitCode !== 0) {
-        root.notify("Could not save Taildrop files", elideStatus(stderr || stdout || "tailscale file get failed"), true, "")
+        root.notify("Could not save Taildrop files", elideStatus(stderr || stdout || "tailscale file get failed"), "critical", [])
       } else {
         var notice = Model.savedFilesNotice(Model.parseSavedFiles(stdout, root._saveDir), root._saveDir, root.homeDir)
-        root.notify(notice.headline, notice.body, false, notice.open)
+        root.notify(notice.headline, notice.body, "", notice.open !== "" ? ["xdg-open", notice.open] : [])
       }
       delayedRefresh.restart()
     }

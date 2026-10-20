@@ -349,6 +349,28 @@ function waitingFilesSummary(files) {
   return what + " · " + formatBytes(total)
 }
 
+// A file is fresh until a poll has seen it. `seen` is rebuilt from the inbox
+// each time, so a file that was saved and then arrives again under the same
+// name is fresh again.
+function diffWaitingFiles(files, seen) {
+  var list = Array.isArray(files) ? files : []
+  var previous = seen || {}
+  var next = {}
+  var fresh = []
+  for (var i = 0; i < list.length; i++) {
+    var name = list[i].name
+    if (!previous[name] && !next[name]) fresh.push(list[i])
+    next[name] = true
+  }
+  return { fresh: fresh, seen: next }
+}
+
+function waitingFilesNotice(fresh) {
+  var list = Array.isArray(fresh) ? fresh : []
+  if (list.length === 1) return { headline: "Received " + list[0].name, body: "Waiting in the Taildrop inbox. Click to save it" }
+  return { headline: "Received " + list.length + " files", body: "Waiting in the Taildrop inbox. Click to save them" }
+}
+
 // From `systemctl show -p LoadState -p ActiveState -p UnitFileState`. A unit
 // counts as on while it is either enabled or running: one that was started by
 // hand still empties the inbox, and one that crashed comes back next login.
@@ -427,6 +449,8 @@ if (typeof module !== "undefined") {
     parseWaitingFiles: parseWaitingFiles,
     formatBytes: formatBytes,
     waitingFilesSummary: waitingFilesSummary,
+    diffWaitingFiles: diffWaitingFiles,
+    waitingFilesNotice: waitingFilesNotice,
     parseUnitState: parseUnitState,
     parseSavedFiles: parseSavedFiles,
     tildePath: tildePath,

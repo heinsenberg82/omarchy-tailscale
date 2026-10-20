@@ -29,7 +29,8 @@ tailnet with its Tailscale IP.
 - Exit node selection, including Mullvad exit nodes
 - Send files with Taildrop, when the tailnet allows file sharing
 - **Taildrop** — save the files waiting in the inbox to a folder you pick, and
-  switch Omarchy's automatic receiving on or off
+  switch Omarchy's automatic receiving on or off. With it off, a notification
+  and a dot on the bar icon say when files are waiting
 
 ## Install
 
@@ -107,7 +108,11 @@ registers an `IpcHandler` of its own, so it can be scripted or bound to a key:
 qs -p /usr/share/omarchy/shell ipc call igor-alexandrov.tailscale toggle
 qs -p /usr/share/omarchy/shell ipc call igor-alexandrov.tailscale open
 qs -p /usr/share/omarchy/shell ipc call igor-alexandrov.tailscale adminConsole
+qs -p /usr/share/omarchy/shell ipc call igor-alexandrov.tailscale saveFiles
 ```
+
+`saveFiles` asks for a folder and saves the waiting Taildrop files there, the
+same as `g` in the panel.
 
 ## Receiving files
 
@@ -128,7 +133,12 @@ The **Taildrop** section of the panel puts that choice in your hands:
   notification reports the result; click it to open the file or folder.
 
 With automatic receiving off, files wait in the inbox until you save them from
-the panel or with `tailscale file get <directory>` yourself. The section only
+the panel or with `tailscale file get <directory>` yourself. As files arrive, a
+notification names them (click it to pick a folder and save them), and the bar
+icon carries an accent dot for as long as anything is waiting. Arrivals are
+picked up at once from tailscaled's message bus (`tailscale debug watch-ipn`),
+with the regular refresh as a fallback; files already waiting are announced
+again when the shell starts. The section only
 appears when the tailnet allows Taildrop or files are already waiting. The
 inbox is listed with `tailscale debug --file get`, the only way the CLI offers
 to look without emptying it; if that ever fails, the save row stays usable and

@@ -8,8 +8,10 @@ Item {
   property real iconSize: Style.font.icon
   property color color: Color.foreground
   property color badgeColor: Color.urgent
+  property color noticeColor: Color.accent
   property bool crossed: false
   property bool warning: false
+  property bool filesWaiting: false
 
   width: iconSize
   height: iconSize
@@ -61,6 +63,19 @@ Item {
       font.pixelSize: Math.max(6, parent.height * 0.72)
       font.bold: true
     }
+  }
+
+  // Taildrop files waiting in the inbox. Top corner and accent rather than
+  // urgent, so it never sits on or reads like the login warning.
+  BorderSurface {
+    visible: root.filesWaiting
+    width: Math.max(5, parent.width * 0.36)
+    height: width
+    radius: width / 2
+    color: root.noticeColor
+    anchors.right: parent.right
+    anchors.top: parent.top
+    borderSpec: Border.flat(Color.popups.background, 1)
   }
 
   component Dot: Rectangle {
