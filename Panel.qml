@@ -219,25 +219,26 @@ Panel {
     if (exitNodeIndex >= exitNodes.length) exitNodeIndex = Math.max(0, exitNodes.length - 1)
     if (mullvadRegionIndex >= filteredMullvadRegions.length) mullvadRegionIndex = Math.max(0, filteredMullvadRegions.length - 1)
     if (taildropIndex >= taildropRows.length) taildropIndex = Math.max(0, taildropRows.length - 1)
-    if (focusSection === "taildrop" && !showTaildrop) focusSection = "admin"
+    if (focusSection === "taildrop" && !showTaildrop) focusSection = "header"
     if (focusSection === "auth" && !tailscale.accountsAccessDenied) focusSection = tailscale.accounts.length > 1 ? "accounts" : (showExitNodes ? "exitNodes" : (showPeers ? "peers" : "header"))
     if (focusSection === "accounts" && tailscale.accounts.length <= 1) focusSection = tailscale.accountsAccessDenied ? "auth" : (showExitNodes ? "exitNodes" : (showPeers ? "peers" : "header"))
     if (focusSection === "peers" && !showPeers) focusSection = showExitNodes ? "exitNodes" : (tailscale.accountsAccessDenied ? "auth" : (tailscale.accounts.length > 1 ? "accounts" : "header"))
     if (focusSection === "exitNodes" && !showExitNodes) focusSection = showPeers ? "peers" : (tailscale.accountsAccessDenied ? "auth" : (tailscale.accounts.length > 1 ? "accounts" : "header"))
   }
 
-  // TAILDROP sits between MACHINES and the admin row, so moving down past the
-  // machines lands on its first row whenever it is shown.
-  function focusBelowPeers() {
-    if (showTaildrop) { focusSection = "taildrop"; taildropIndex = 0 }
+  // TAILDROP sits between the header and CONNECTIONS, high enough to stay in
+  // view however many machines the tailnet has. Moving down from the header
+  // lands on its first row, and moving up past CONNECTIONS on its last.
+  function focusBelowTaildrop() {
+    if (tailscale.accountsAccessDenied) focusSection = "auth"
+    else if (tailscale.accounts.length > 1) focusSection = "accounts"
+    else if (showExitNodes) focusSection = "exitNodes"
+    else if (showPeers) focusSection = "peers"
     else focusSection = "admin"
   }
 
-  function focusAboveTaildrop() {
-    if (showPeers) { focusSection = "peers"; peerIndex = tailscale.peers.length - 1 }
-    else if (showExitNodes) { focusSection = "exitNodes"; exitNodeIndex = exitNodes.length - 1 }
-    else if (tailscale.accounts.length > 1) { focusSection = "accounts"; accountIndex = tailscale.accounts.length - 1 }
-    else if (tailscale.accountsAccessDenied) focusSection = "auth"
+  function focusAboveConnections() {
+    if (showTaildrop) { focusSection = "taildrop"; taildropIndex = taildropRows.length - 1 }
     else focusSection = "header"
   }
 
@@ -247,62 +248,68 @@ Panel {
     if (dy !== 0) {
       if (focusSection === "header") {
         if (dy > 0) {
-          if (tailscale.accountsAccessDenied) focusSection = "auth"
-          else if (tailscale.accounts.length > 1) focusSection = "accounts"
-          else if (showExitNodes) focusSection = "exitNodes"
-          else if (showPeers) focusSection = "peers"
-          else focusBelowPeers()
+          if (showTaildrop) { focusSection = "taildrop"; taildropIndex = 0 }
+          else focusBelowTaildrop()
+        }
+      } else if (focusSection === "taildrop") {
+        if (dy < 0) {
+          if (taildropIndex <= 0) focusSection = "header"
+          else taildropIndex--
+        } else if (taildropIndex < taildropRows.length - 1) {
+          taildropIndex++
+        } else {
+          focusBelowTaildrop()
         }
       } else if (focusSection === "auth") {
-        if (dy < 0) focusSection = "header"
+        if (dy < 0) focusAboveConnections()
         else if (tailscale.accounts.length > 1) focusSection = "accounts"
         else if (showExitNodes) focusSection = "exitNodes"
         else if (showPeers) focusSection = "peers"
-        else focusBelowPeers()
+        else focusSection = "admin"
       } else if (focusSection === "accounts") {
         if (dy < 0) {
-          if (accountIndex <= 0) focusSection = tailscale.accountsAccessDenied ? "auth" : "header"
-          else accountIndex--
+          if (accountIndex > 0) accountIndex--
+          else if (tailscale.accountsAccessDenied) focusSection = "auth"
+          else focusAboveConnections()
         } else {
           if (accountIndex < tailscale.accounts.length - 1) accountIndex++
           else if (showExitNodes) focusSection = "exitNodes"
           else if (showPeers) focusSection = "peers"
-          else focusBelowPeers()
+          else focusSection = "admin"
         }
       } else if (focusSection === "peers") {
         if (dy < 0) {
-          if (peerIndex <= 0) focusSection = showExitNodes ? "exitNodes" : (tailscale.accounts.length > 1 ? "accounts" : (tailscale.accountsAccessDenied ? "auth" : "header"))
-          else peerIndex--
+          if (peerIndex > 0) peerIndex--
+          else if (showExitNodes) focusSection = "exitNodes"
+          else if (tailscale.accounts.length > 1) focusSection = "accounts"
+          else if (tailscale.accountsAccessDenied) focusSection = "auth"
+          else focusAboveConnections()
         } else if (peerIndex < tailscale.peers.length - 1) {
           peerIndex++
         } else {
-          focusBelowPeers()
+          focusSection = "admin"
         }
       } else if (focusSection === "exitNodes") {
         if (dy < 0) {
-          if (exitNodeIndex <= 0) focusSection = tailscale.accounts.length > 1 ? "accounts" : (tailscale.accountsAccessDenied ? "auth" : "header")
-          else exitNodeIndex--
+          if (exitNodeIndex > 0) exitNodeIndex--
+          else if (tailscale.accounts.length > 1) focusSection = "accounts"
+          else if (tailscale.accountsAccessDenied) focusSection = "auth"
+          else focusAboveConnections()
         } else if (exitNodeIndex < exitNodes.length - 1) {
           exitNodeIndex++
         } else if (showPeers) {
           focusSection = "peers"
-        } else {
-          focusBelowPeers()
-        }
-      } else if (focusSection === "taildrop") {
-        if (dy < 0) {
-          if (taildropIndex <= 0) focusAboveTaildrop()
-          else taildropIndex--
-        } else if (taildropIndex < taildropRows.length - 1) {
-          taildropIndex++
         } else {
           focusSection = "admin"
         }
       } else if (focusSection === "admin") {
         // Always the last row, so only upward movement has anywhere to go.
         if (dy < 0) {
-          if (showTaildrop) { focusSection = "taildrop"; taildropIndex = taildropRows.length - 1 }
-          else focusAboveTaildrop()
+          if (showPeers) { focusSection = "peers"; peerIndex = tailscale.peers.length - 1 }
+          else if (showExitNodes) { focusSection = "exitNodes"; exitNodeIndex = exitNodes.length - 1 }
+          else if (tailscale.accounts.length > 1) { focusSection = "accounts"; accountIndex = tailscale.accounts.length - 1 }
+          else if (tailscale.accountsAccessDenied) focusSection = "auth"
+          else focusAboveConnections()
         }
       }
     }
@@ -651,6 +658,39 @@ Panel {
           }
 
           PanelSeparator {
+            visible: root.showTaildrop
+            foreground: root.foreground
+          }
+
+          Column {
+            visible: root.showTaildrop
+            width: parent.width
+            spacing: Style.space(10)
+
+            PanelSectionHeader {
+              text: "TAILDROP"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(6)
+
+              AutoReceiveRow {
+                id: autoReceiveRow
+                visible: tailscale.receiveServiceAvailable
+                width: parent.width
+              }
+
+              SaveFilesRow {
+                id: saveFilesRow
+                width: parent.width
+              }
+            }
+          }
+
+          PanelSeparator {
             visible: root.showConnections
             foreground: root.foreground
           }
@@ -828,39 +868,6 @@ Panel {
                   peer: modelData
                   rowIndex: index
                 }
-              }
-            }
-          }
-
-          PanelSeparator {
-            visible: root.showTaildrop
-            foreground: root.foreground
-          }
-
-          Column {
-            visible: root.showTaildrop
-            width: parent.width
-            spacing: Style.space(10)
-
-            PanelSectionHeader {
-              text: "TAILDROP"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(6)
-
-              AutoReceiveRow {
-                id: autoReceiveRow
-                visible: tailscale.receiveServiceAvailable
-                width: parent.width
-              }
-
-              SaveFilesRow {
-                id: saveFilesRow
-                width: parent.width
               }
             }
           }
