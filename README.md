@@ -1,6 +1,6 @@
 # omarchy-tailscale
 
-[![CI](https://github.com/igor-alexandrov/omarchy-tailscale/actions/workflows/ci.yml/badge.svg)](https://github.com/igor-alexandrov/omarchy-tailscale/actions/workflows/ci.yml)
+[![CI](https://github.com/heinsenberg82/omarchy-tailscale/actions/workflows/ci.yml/badge.svg)](https://github.com/heinsenberg82/omarchy-tailscale/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Omarchy](https://img.shields.io/badge/Omarchy-4.x-8b5cf6.svg)](https://omarchy.org/)
 
@@ -10,9 +10,17 @@ equivalent of the Tailscale menu bar icon on macOS.
 Click the icon to see your account, this device, and every machine on your
 tailnet with its Tailscale IP.
 
+This is a fork of
+[igor-alexandrov/omarchy-tailscale](https://github.com/igor-alexandrov/omarchy-tailscale)
+that adds a **Taildrop** section for receiving files on your own terms:
+automatic receiving becomes a switch, files can wait in the inbox until you
+save them to a folder of your choice, and you are told when they arrive. The
+plugin id is unchanged, `igor-alexandrov.tailscale`, so that is the name every
+command below uses.
+
 <img src="docs/panel.png" alt="The Tailscale panel open in the Omarchy bar, showing This device, Machines and Account sections" width="384">
 
-*Addresses are blurred in the screenshot.*
+*Addresses are blurred in the screenshot, which predates the Taildrop section.*
 
 ## Features
 
@@ -34,17 +42,46 @@ tailnet with its Tailscale IP.
 
 ## Install
 
-```bash
-omarchy plugin add git@github.com:igor-alexandrov/omarchy-tailscale.git --enable
-```
-
-Then place it in the bar if you want it somewhere specific:
+Omarchy's Tailscale install puts its own first-party widget,
+`omarchy.tailscale`, in the bar. Disable it first so the bar does not show two:
 
 ```bash
-omarchy bar move igor-alexandrov.tailscale --section right
+omarchy plugin disable omarchy.tailscale
 ```
 
-Update later with `omarchy plugin update igor-alexandrov.tailscale`.
+The first-party widget ships inside the Omarchy package, so it can be disabled
+but not removed; `omarchy plugin remove` only handles plugins under
+`~/.config/omarchy/plugins`. Then add this fork:
+
+```bash
+omarchy plugin add https://github.com/heinsenberg82/omarchy-tailscale.git --enable
+```
+
+- Use the HTTPS URL. `omarchy plugin add` runs ssh in batch mode, so an SSH
+  URL fails with `Host key verification failed` unless `github.com` is already
+  in `~/.ssh/known_hosts`. The repository is public, so HTTPS needs no
+  credentials, for updates either.
+- Without a terminal to ask in (a script, or a shell command run from another
+  tool), add `--yes`, or it refuses to continue.
+
+Then place it in the bar, for example where the first-party widget was:
+
+```bash
+omarchy bar move igor-alexandrov.tailscale --section right --before omarchy.tray
+```
+
+Any widget already in the bar works with `--before` or `--after`; `--index`
+takes a position instead.
+
+Update later with:
+
+```bash
+omarchy plugin update igor-alexandrov.tailscale
+omarchy restart shell
+```
+
+The shell reloads the files on update but keeps rendering the panel it already
+built, so the restart is what brings the new version up.
 
 ## Uninstall
 
@@ -58,6 +95,9 @@ directory. To keep the plugin installed but hide it, disable it instead:
 ```bash
 omarchy plugin disable igor-alexandrov.tailscale
 ```
+
+To go back to Omarchy's own widget, enable it again with
+`omarchy plugin enable omarchy.tailscale`.
 
 Widget settings are not stored in the plugin directory: the refresh interval and
 your recently used Mullvad exit nodes live in the bar layout in
@@ -157,10 +197,14 @@ The plugin is plain QML plus one JavaScript module, loaded directly by
 | `TailscaleIcon.qml` | The bar icon |
 | `manifest.json` | Plugin id, kinds, entry point, bar widget settings |
 
-To work on it, point the plugin directory at your checkout:
+To work on it, clone the fork and point the plugin directory at your checkout
+instead of the copy `omarchy plugin add` made:
 
 ```bash
+git clone https://github.com/heinsenberg82/omarchy-tailscale.git ~/path/to/omarchy-tailscale
+omarchy plugin remove igor-alexandrov.tailscale --yes
 ln -s ~/path/to/omarchy-tailscale ~/.config/omarchy/plugins/igor-alexandrov.tailscale
+omarchy plugin enable igor-alexandrov.tailscale
 ```
 
 **Saving a file is not enough to see UI changes.** The shell logs
@@ -207,9 +251,14 @@ your tailnet name, none of which belong in a public repository.
 
 ## Credits
 
-Derived from the first-party `omarchy.tailscale` widget in
-[Omarchy](https://github.com/basecamp/omarchy) by Basecamp, which is MIT
-licensed. This fork adds the *This device* and *Account* sections, lists offline
-machines instead of hiding them, and adds the `a` shortcut and the IPC target.
+Forked from
+[igor-alexandrov/omarchy-tailscale](https://github.com/igor-alexandrov/omarchy-tailscale)
+by Igor Alexandrov, which is derived from the first-party `omarchy.tailscale`
+widget in [Omarchy](https://github.com/basecamp/omarchy) by Basecamp, MIT
+licensed. Igor's version adds the *This device* and *Account* sections, lists
+offline machines instead of hiding them, and adds the `a` shortcut and the IPC
+target. This fork adds the *Taildrop* section: the automatic receiving switch,
+saving waiting files to a folder you pick, and the arrival notification and bar
+icon dot.
 
 MIT licensed — see [LICENSE](LICENSE).
