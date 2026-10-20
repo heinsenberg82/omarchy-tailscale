@@ -1,7 +1,7 @@
 // Manifest checks, mirroring what `omarchy plugin validate` enforces.
 //
 // `omarchy plugin validate` is the authority, but it needs Omarchy installed,
-// so it cannot run on a stock CI runner. This re-checks the same rules — the
+// so it cannot run on a machine without it. This re-checks the same rules — the
 // ones in omarchy-plugin-validate — plus that the declared entry points exist.
 //
 //   node test/manifest-test.js

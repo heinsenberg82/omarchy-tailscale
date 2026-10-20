@@ -58,8 +58,8 @@ Each piece of logic has one home:
 ## Verifying
 
 `bin/check` is the gate; done is its final line, `All checks passed.` It skips
-steps whose tooling is missing, so on a machine without Omarchy or Qt 6 (and in
-CI) `omarchy plugin validate` and `qmllint` never run: say so when reporting.
+steps whose tooling is missing, so on a machine without Omarchy or Qt 6
+`omarchy plugin validate` and `qmllint` never run: say so when reporting.
 qmllint warnings are expected (hundreds, mostly inherited from upstream);
 errors fail.
 

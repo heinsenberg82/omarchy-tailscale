@@ -2,7 +2,7 @@
 #
 # Run every check for this plugin. Steps that need tools this machine may not
 # have (Omarchy, Qt 6) are skipped with a note rather than failing, so the same
-# script works on a developer machine and on a stock CI runner.
+# script works on any machine with node.
 #
 #   bin/check
 

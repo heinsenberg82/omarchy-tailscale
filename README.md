@@ -1,6 +1,5 @@
 # omarchy-tailscale
 
-[![CI](https://github.com/heinsenberg82/omarchy-tailscale/actions/workflows/ci.yml/badge.svg)](https://github.com/heinsenberg82/omarchy-tailscale/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Omarchy](https://img.shields.io/badge/Omarchy-4.x-8b5cf6.svg)](https://omarchy.org/)
 
@@ -229,9 +228,8 @@ Runs everything, skipping any step whose tooling is missing rather than failing:
 | `omarchy plugin validate .` | Omarchy | The authoritative manifest check |
 | `qmllint` | Qt 6 | QML errors |
 
-CI runs `bin/check` on every push and pull request. A stock runner has neither
-Omarchy nor Qt 6, so the last two steps are local-only — run `bin/check` on your
-Omarchy machine before releasing.
+The last two steps only run on a machine with Omarchy and Qt 6, so run
+`bin/check` on your Omarchy machine before releasing.
 
 Two notes on qmllint, which cost some time to work out:
 
