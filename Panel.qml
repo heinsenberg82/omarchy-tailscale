@@ -1249,7 +1249,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           Layout.fillWidth: true
-          text: tailscale.autoReceive ? "Incoming files go straight to Downloads" : "Incoming files wait here until you save them"
+          text: tailscale.autoReceive ? "Saved to Downloads as they arrive" : "Files wait here until you save them"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.bodySmall
