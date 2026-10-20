@@ -41,10 +41,21 @@ Item {
   property bool accountsAccessDenied: false
   property string actionStatus: ""
   property string lastError: ""
+  property var waitingFiles: []
+  property bool waitingFilesKnown: false
+  property bool receiveServiceAvailable: false
+  property bool autoReceive: false
 
+  // Omarchy's own receiver, which drains the Taildrop inbox into ~/Downloads
+  // the moment a file lands. The plugin only reports and flips it on request.
+  readonly property string receiveService: "omarchy-tailscale-receive.service"
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 30, 5, 3600)
-  readonly property bool busy: whichProcess.running || statusProcess.running || mullvadExitNodesProcess.running || accountsProcess.running || actionProcess.running || loginProcess.running || switchProcess.running || operatorProcess.running || exitNodeProcess.running
+  readonly property bool busy: whichProcess.running || statusProcess.running || mullvadExitNodesProcess.running || accountsProcess.running || waitingFilesProcess.running || receiveStateProcess.running || actionProcess.running || loginProcess.running || switchProcess.running || operatorProcess.running || exitNodeProcess.running
+  readonly property bool settingAutoReceive: receiveServiceProcess.running
+  readonly property bool savingFiles: folderPickerProcess.running || fileGetProcess.running
+  readonly property string waitingFilesSummary: Model.waitingFilesSummary(waitingFiles)
   readonly property string userName: Quickshell.env("USER") || Quickshell.env("LOGNAME")
+  readonly property string homeDir: Quickshell.env("HOME") || ""
 
   property string _statusOutput: ""
   property string _statusError: ""
@@ -66,6 +77,17 @@ Item {
   property string _exitNodeError: ""
   property string _operatorOutput: ""
   property string _operatorError: ""
+  property string _waitingFilesOutput: ""
+  property string _waitingFilesError: ""
+  property string _receiveStateOutput: ""
+  property string _receiveStateError: ""
+  property string _receiveServiceOutput: ""
+  property string _receiveServiceError: ""
+  property string _folderPickerOutput: ""
+  property string _folderPickerError: ""
+  property string _fileGetOutput: ""
+  property string _fileGetError: ""
+  property string _saveDir: ""
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -146,6 +168,46 @@ Item {
     Quickshell.execDetached(["omarchy-tailscale-send", target])
   }
 
+  function notify(headline, body, critical, openPath) {
+    var args = ["omarchy-notification-send", "-g", "󰒊"]
+    if (critical === true) args.push("-u", "critical")
+    args.push(headline)
+    if (body) args.push(body)
+    if (openPath) args.push("--exec", "xdg-open", openPath)
+    Quickshell.execDetached(args)
+  }
+
+  function setAutoReceive(on) {
+    if (!receiveServiceAvailable || receiveServiceProcess.running) return
+    _receiveServiceOutput = ""
+    _receiveServiceError = ""
+    receiveServiceProcess.command = ["systemctl", "--user", on ? "enable" : "disable", "--now", receiveService]
+    receiveServiceProcess.running = true
+  }
+
+  function toggleAutoReceive() {
+    setAutoReceive(!autoReceive)
+  }
+
+  // Asks for a folder first; fileGetProcess takes over once one is picked.
+  function saveWaitingFiles() {
+    if (!installed || savingFiles) return
+    _folderPickerOutput = ""
+    _folderPickerError = ""
+    folderPickerProcess.command = ["omarchy-file-select", "--directory", "--title", "Save Taildrop files"]
+    folderPickerProcess.running = true
+  }
+
+  function getWaitingFiles(dir) {
+    _saveDir = dir
+    _fileGetOutput = ""
+    _fileGetError = ""
+    // rename rather than the default skip, which would leave a same-named file
+    // stuck in the inbox and report the whole run as failed.
+    fileGetProcess.command = ["tailscale", "file", "get", "--verbose", "--conflict=rename", dir]
+    fileGetProcess.running = true
+  }
+
   function refresh(forceAccounts) {
     if (installed) {
       refreshStatusAndAccounts(forceAccounts === true)
@@ -184,6 +246,22 @@ Item {
       _lastAccountsRefreshMs = now
       accountsProcess.command = ["tailscale", "switch", "--list", "--json"]
       accountsProcess.running = true
+      launched = true
+    }
+    if (!waitingFilesProcess.running) {
+      _waitingFilesOutput = ""
+      _waitingFilesError = ""
+      // `tailscale file` has no way to list the inbox without emptying it; the
+      // debug command is the only read-only view the CLI offers.
+      waitingFilesProcess.command = ["tailscale", "debug", "--file", "get"]
+      waitingFilesProcess.running = true
+      launched = true
+    }
+    if (!receiveStateProcess.running) {
+      _receiveStateOutput = ""
+      _receiveStateError = ""
+      receiveStateProcess.command = ["systemctl", "--user", "show", "-p", "LoadState", "-p", "ActiveState", "-p", "UnitFileState", receiveService]
+      receiveStateProcess.running = true
       launched = true
     }
     // Arm on the launch that needs watching and leave it alone after that.
@@ -434,6 +512,8 @@ Item {
       if (statusProcess.running) statusProcess.running = false
       if (mullvadExitNodesProcess.running) mullvadExitNodesProcess.running = false
       if (accountsProcess.running) accountsProcess.running = false
+      if (waitingFilesProcess.running) waitingFilesProcess.running = false
+      if (receiveStateProcess.running) receiveStateProcess.running = false
     }
   }
 
@@ -633,6 +713,90 @@ Item {
         root.actionStatus = "Tailscale operator authorized"
         actionStatusTimer.restart()
         root._lastAccountsRefreshMs = 0
+      }
+      delayedRefresh.restart()
+    }
+  }
+
+  Process {
+    id: waitingFilesProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: waitingFilesStdout; waitForEnd: true; onStreamFinished: root._waitingFilesOutput = text }
+    stderr: StdioCollector { id: waitingFilesStderr; waitForEnd: true; onStreamFinished: root._waitingFilesError = text }
+    onExited: function(exitCode) {
+      var stdout = String(waitingFilesStdout.text || root._waitingFilesOutput || "")
+      var files = exitCode === 0 ? Model.parseWaitingFiles(stdout) : null
+      root.waitingFilesKnown = files !== null
+      root.waitingFiles = files || []
+    }
+  }
+
+  Process {
+    id: receiveStateProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: receiveStateStdout; waitForEnd: true; onStreamFinished: root._receiveStateOutput = text }
+    stderr: StdioCollector { id: receiveStateStderr; waitForEnd: true; onStreamFinished: root._receiveStateError = text }
+    onExited: function(exitCode) {
+      var stdout = String(receiveStateStdout.text || root._receiveStateOutput || "")
+      var state = Model.parseUnitState(exitCode === 0 ? stdout : "")
+      root.receiveServiceAvailable = state.loaded
+      root.autoReceive = state.enabled || state.active
+    }
+  }
+
+  Process {
+    id: receiveServiceProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: receiveServiceStdout; waitForEnd: true; onStreamFinished: root._receiveServiceOutput = text }
+    stderr: StdioCollector { id: receiveServiceStderr; waitForEnd: true; onStreamFinished: root._receiveServiceError = text }
+    onExited: function(exitCode) {
+      var stdout = String(receiveServiceStdout.text || root._receiveServiceOutput || "")
+      var stderr = String(receiveServiceStderr.text || root._receiveServiceError || "")
+      if (exitCode !== 0) {
+        root.lastError = elideStatus(stderr || stdout || "Could not change automatic receiving")
+        root.actionStatus = root.lastError
+        actionStatusTimer.restart()
+      } else {
+        root.lastError = ""
+        root.actionStatus = ""
+      }
+      delayedRefresh.restart()
+    }
+  }
+
+  Process {
+    id: folderPickerProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: folderPickerStdout; waitForEnd: true; onStreamFinished: root._folderPickerOutput = text }
+    stderr: StdioCollector { id: folderPickerStderr; waitForEnd: true; onStreamFinished: root._folderPickerError = text }
+    onExited: function(exitCode) {
+      var stdout = String(folderPickerStdout.text || root._folderPickerOutput || "")
+      var dir = stdout.split(/\r?\n/)[0].trim()
+      // 1 is the chooser closing with nothing picked, which is a decision, not
+      // a fault. Anything above it means the chooser never ran.
+      if (exitCode === 0 && dir !== "") root.getWaitingFiles(dir)
+      else if (exitCode > 1) root.notify("Could not save Taildrop files", "The folder chooser did not open", true, "")
+    }
+  }
+
+  Process {
+    id: fileGetProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: fileGetStdout; waitForEnd: true; onStreamFinished: root._fileGetOutput = text }
+    stderr: StdioCollector { id: fileGetStderr; waitForEnd: true; onStreamFinished: root._fileGetError = text }
+    onExited: function(exitCode) {
+      var stdout = String(fileGetStdout.text || root._fileGetOutput || "")
+      var stderr = String(fileGetStderr.text || root._fileGetError || "")
+      if (exitCode !== 0) {
+        root.notify("Could not save Taildrop files", elideStatus(stderr || stdout || "tailscale file get failed"), true, "")
+      } else {
+        var notice = Model.savedFilesNotice(Model.parseSavedFiles(stdout, root._saveDir), root._saveDir, root.homeDir)
+        root.notify(notice.headline, notice.body, false, notice.open)
       }
       delayedRefresh.restart()
     }

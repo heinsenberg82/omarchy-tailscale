@@ -144,6 +144,75 @@ check("accountLabel falls back to the tailnet",
   M.accountLabel({ tailnet: "t.ts.net", account: "a@example.com" }), "t.ts.net")
 check("accountLabel with nothing", M.accountLabel(null), "Unknown account")
 
+// --- Taildrop inbox ---------------------------------------------------------
+
+const waitingRaw = JSON.stringify([
+  { Name: "notes.pdf", Size: 1536 },
+  { Name: "photo.jpg", Size: 2 * 1024 * 1024 },
+  { Name: "", Size: 10 }
+])
+check("parseWaitingFiles reads names and sizes, skipping nameless entries",
+  M.parseWaitingFiles(waitingRaw),
+  [{ name: "notes.pdf", size: 1536 }, { name: "photo.jpg", size: 2097152 }])
+check("parseWaitingFiles reads `null` as an empty inbox", M.parseWaitingFiles("null\n"), [])
+check("parseWaitingFiles cannot tell from empty output", M.parseWaitingFiles(""), null)
+check("parseWaitingFiles cannot tell from garbage", M.parseWaitingFiles("{{{"), null)
+check("parseWaitingFiles rejects a non-list", M.parseWaitingFiles("{\"Name\":\"x\"}"), null)
+
+check("formatBytes keeps bytes whole", M.formatBytes(512), "512 B")
+check("formatBytes gives small values one decimal", M.formatBytes(1536), "1.5 KB")
+check("formatBytes drops the decimal from ten up", M.formatBytes(12 * 1024 * 1024), "12 MB")
+check("formatBytes tolerates nonsense", M.formatBytes(undefined), "0 B")
+
+check("waitingFilesSummary on an empty inbox", M.waitingFilesSummary([]), "No files waiting")
+check("waitingFilesSummary names a single file",
+  M.waitingFilesSummary([{ name: "notes.pdf", size: 1536 }]), "notes.pdf · 1.5 KB")
+check("waitingFilesSummary counts several files and adds up their size",
+  M.waitingFilesSummary(M.parseWaitingFiles(waitingRaw)), "2 files · 2.0 MB")
+
+check("parseUnitState: enabled and running",
+  M.parseUnitState("LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n"),
+  { loaded: true, enabled: true, active: true })
+check("parseUnitState: disabled and stopped",
+  M.parseUnitState("LoadState=loaded\nActiveState=inactive\nUnitFileState=disabled\n"),
+  { loaded: true, enabled: false, active: false })
+check("parseUnitState: started by hand while disabled",
+  M.parseUnitState("LoadState=loaded\nActiveState=active\nUnitFileState=disabled\n"),
+  { loaded: true, enabled: false, active: true })
+check("parseUnitState: unit not installed",
+  M.parseUnitState("LoadState=not-found\nActiveState=inactive\nUnitFileState=\n"),
+  { loaded: false, enabled: false, active: false })
+check("parseUnitState: masked is not enabled",
+  M.parseUnitState("LoadState=masked\nActiveState=inactive\nUnitFileState=masked\n"),
+  { loaded: false, enabled: false, active: false })
+
+const getOutput = [
+  "wrote notes.pdf as /home/me/Saved as/notes.pdf (1536 bytes)",
+  "wrote a as b.txt as /home/me/Saved as/a as b (1).txt (3 bytes)",
+  "moved 2/2 files",
+  ""
+].join("\n")
+check("parseSavedFiles anchors on the target directory, even through \" as \"",
+  M.parseSavedFiles(getOutput, "/home/me/Saved as"),
+  ["/home/me/Saved as/notes.pdf", "/home/me/Saved as/a as b (1).txt"])
+check("parseSavedFiles ignores a trailing slash on the directory",
+  M.parseSavedFiles(getOutput, "/home/me/Saved as/").length, 2)
+check("parseSavedFiles on an empty inbox", M.parseSavedFiles("moved 0/0 files\n", "/tmp"), [])
+
+check("tildePath shortens paths under home", M.tildePath("/home/me/Downloads", "/home/me"), "~/Downloads")
+check("tildePath on home itself", M.tildePath("/home/me", "/home/me/"), "~")
+check("tildePath leaves a lookalike prefix alone", M.tildePath("/home/meadow/x", "/home/me"), "/home/meadow/x")
+check("tildePath leaves paths outside home alone", M.tildePath("/srv/drop", "/home/me"), "/srv/drop")
+
+check("savedFilesNotice for one file opens the file",
+  M.savedFilesNotice(["/home/me/Downloads/notes.pdf"], "/home/me/Downloads", "/home/me"),
+  { headline: "Saved notes.pdf", body: "to ~/Downloads", open: "/home/me/Downloads/notes.pdf" })
+check("savedFilesNotice for several files opens the folder",
+  M.savedFilesNotice(["/srv/a", "/srv/b"], "/srv", "/home/me"),
+  { headline: "Saved 2 files", body: "to /srv", open: "/srv" })
+check("savedFilesNotice when nothing was waiting",
+  M.savedFilesNotice([], "/srv", "/home/me").headline, "No Taildrop files waiting")
+
 // --- report -----------------------------------------------------------------
 
 if (failures.length > 0) {

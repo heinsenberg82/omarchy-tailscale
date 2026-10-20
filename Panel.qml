@@ -32,6 +32,7 @@ Panel {
   property int peerIndex: 0
   property int exitNodeIndex: 0
   property int mullvadRegionIndex: 0
+  property int taildropIndex: 0
   property bool cursorActive: false
   property bool copyMenuOpen: false
   property bool mullvadPickerOpen: false
@@ -64,6 +65,14 @@ Panel {
   readonly property var exitNodes: displayExitNodes()
   readonly property bool showExitNodes: tailscale.active && (exitNodes.length > 0 || tailscale.mullvadRegions.length > 0)
   readonly property var filteredMullvadRegions: filteredMullvadRegionNodes()
+  // Files can wait in the inbox from before Taildrop was turned off, so they
+  // keep the section up on their own.
+  readonly property bool showTaildrop: tailscale.installed && (tailscale.fileSharing || tailscale.waitingFiles.length > 0)
+  readonly property var taildropRows: tailscale.receiveServiceAvailable ? ["autoReceive", "save"] : ["save"]
+  readonly property string selectedTaildropRow: taildropRows[Math.max(0, Math.min(taildropIndex, taildropRows.length - 1))]
+  // An inbox that could not be listed still gets a try: `tailscale file get`
+  // reports for itself when there is nothing to save.
+  readonly property bool canSaveFiles: showTaildrop && !tailscale.savingFiles && (!tailscale.waitingFilesKnown || tailscale.waitingFiles.length > 0)
   // Only claim the header cursor when the switch is actually on screen —
   // "header" stays navigable, but an absent CLI leaves nothing to highlight.
   readonly property bool headerHasCursor: cursorActive && focusSection === "header" && tailscale.installed
@@ -207,10 +216,27 @@ Panel {
     if (peerIndex >= tailscale.peers.length) peerIndex = Math.max(0, tailscale.peers.length - 1)
     if (exitNodeIndex >= exitNodes.length) exitNodeIndex = Math.max(0, exitNodes.length - 1)
     if (mullvadRegionIndex >= filteredMullvadRegions.length) mullvadRegionIndex = Math.max(0, filteredMullvadRegions.length - 1)
+    if (taildropIndex >= taildropRows.length) taildropIndex = Math.max(0, taildropRows.length - 1)
+    if (focusSection === "taildrop" && !showTaildrop) focusSection = "admin"
     if (focusSection === "auth" && !tailscale.accountsAccessDenied) focusSection = tailscale.accounts.length > 1 ? "accounts" : (showExitNodes ? "exitNodes" : (showPeers ? "peers" : "header"))
     if (focusSection === "accounts" && tailscale.accounts.length <= 1) focusSection = tailscale.accountsAccessDenied ? "auth" : (showExitNodes ? "exitNodes" : (showPeers ? "peers" : "header"))
     if (focusSection === "peers" && !showPeers) focusSection = showExitNodes ? "exitNodes" : (tailscale.accountsAccessDenied ? "auth" : (tailscale.accounts.length > 1 ? "accounts" : "header"))
     if (focusSection === "exitNodes" && !showExitNodes) focusSection = showPeers ? "peers" : (tailscale.accountsAccessDenied ? "auth" : (tailscale.accounts.length > 1 ? "accounts" : "header"))
+  }
+
+  // TAILDROP sits between MACHINES and the admin row, so moving down past the
+  // machines lands on its first row whenever it is shown.
+  function focusBelowPeers() {
+    if (showTaildrop) { focusSection = "taildrop"; taildropIndex = 0 }
+    else focusSection = "admin"
+  }
+
+  function focusAboveTaildrop() {
+    if (showPeers) { focusSection = "peers"; peerIndex = tailscale.peers.length - 1 }
+    else if (showExitNodes) { focusSection = "exitNodes"; exitNodeIndex = exitNodes.length - 1 }
+    else if (tailscale.accounts.length > 1) { focusSection = "accounts"; accountIndex = tailscale.accounts.length - 1 }
+    else if (tailscale.accountsAccessDenied) focusSection = "auth"
+    else focusSection = "header"
   }
 
   function moveCursor(dx, dy) {
@@ -223,14 +249,14 @@ Panel {
           else if (tailscale.accounts.length > 1) focusSection = "accounts"
           else if (showExitNodes) focusSection = "exitNodes"
           else if (showPeers) focusSection = "peers"
-          else focusSection = "admin"
+          else focusBelowPeers()
         }
       } else if (focusSection === "auth") {
         if (dy < 0) focusSection = "header"
         else if (tailscale.accounts.length > 1) focusSection = "accounts"
         else if (showExitNodes) focusSection = "exitNodes"
         else if (showPeers) focusSection = "peers"
-        else focusSection = "admin"
+        else focusBelowPeers()
       } else if (focusSection === "accounts") {
         if (dy < 0) {
           if (accountIndex <= 0) focusSection = tailscale.accountsAccessDenied ? "auth" : "header"
@@ -239,7 +265,7 @@ Panel {
           if (accountIndex < tailscale.accounts.length - 1) accountIndex++
           else if (showExitNodes) focusSection = "exitNodes"
           else if (showPeers) focusSection = "peers"
-          else focusSection = "admin"
+          else focusBelowPeers()
         }
       } else if (focusSection === "peers") {
         if (dy < 0) {
@@ -248,7 +274,7 @@ Panel {
         } else if (peerIndex < tailscale.peers.length - 1) {
           peerIndex++
         } else {
-          focusSection = "admin"
+          focusBelowPeers()
         }
       } else if (focusSection === "exitNodes") {
         if (dy < 0) {
@@ -259,16 +285,22 @@ Panel {
         } else if (showPeers) {
           focusSection = "peers"
         } else {
+          focusBelowPeers()
+        }
+      } else if (focusSection === "taildrop") {
+        if (dy < 0) {
+          if (taildropIndex <= 0) focusAboveTaildrop()
+          else taildropIndex--
+        } else if (taildropIndex < taildropRows.length - 1) {
+          taildropIndex++
+        } else {
           focusSection = "admin"
         }
       } else if (focusSection === "admin") {
         // Always the last row, so only upward movement has anywhere to go.
         if (dy < 0) {
-          if (showPeers) { focusSection = "peers"; peerIndex = tailscale.peers.length - 1 }
-          else if (showExitNodes) { focusSection = "exitNodes"; exitNodeIndex = exitNodes.length - 1 }
-          else if (tailscale.accounts.length > 1) { focusSection = "accounts"; accountIndex = tailscale.accounts.length - 1 }
-          else if (tailscale.accountsAccessDenied) focusSection = "auth"
-          else focusSection = "header"
+          if (showTaildrop) { focusSection = "taildrop"; taildropIndex = taildropRows.length - 1 }
+          else focusAboveTaildrop()
         }
       }
     }
@@ -289,6 +321,9 @@ Panel {
       openSelectedPeerCopyMenu()
     } else if (focusSection === "exitNodes") {
       chooseExitNode(selectedExitNode())
+    } else if (focusSection === "taildrop") {
+      if (selectedTaildropRow === "autoReceive") tailscale.toggleAutoReceive()
+      else saveWaitingFiles()
     } else if (focusSection === "admin") {
       openAdminConsole()
     }
@@ -325,6 +360,7 @@ Panel {
   function scrollCursorIntoView() {
     if (focusSection === "peers" && peerColumn && peerIndex >= 0 && peerIndex < peerColumn.children.length) scrollItemIntoView(peerColumn.children[peerIndex])
     else if (focusSection === "exitNodes" && exitNodeColumn && exitNodeIndex >= 0 && exitNodeIndex < exitNodeColumn.children.length) scrollItemIntoView(exitNodeColumn.children[exitNodeIndex])
+    else if (focusSection === "taildrop") scrollItemIntoView(selectedTaildropRow === "autoReceive" ? autoReceiveRow : saveFilesRow)
   }
 
   function scrollMullvadRegionCursorIntoView() {
@@ -343,6 +379,21 @@ Panel {
     if (!tailscale.canSendFiles(peer)) return
     tailscale.sendFile(peer)
     close()
+  }
+
+  // Same for the folder chooser; a notification reports how it went.
+  function saveWaitingFiles() {
+    if (!canSaveFiles) return
+    tailscale.saveWaitingFiles()
+    close()
+  }
+
+  function setTaildropCursor(row) {
+    var index = taildropRows.indexOf(row)
+    if (index === -1) return
+    cursorActive = true
+    focusSection = "taildrop"
+    taildropIndex = index
   }
 
   function openSelectedPeerCopyMenu() {
@@ -386,10 +437,13 @@ Panel {
   }
   onPeerIndexChanged: scrollCursorIntoView()
   onExitNodeIndexChanged: scrollCursorIntoView()
+  onTaildropIndexChanged: scrollCursorIntoView()
   onMullvadRegionIndexChanged: if (mullvadPickerOpen) scrollMullvadRegionCursorIntoView()
   onShowConnectionsChanged: ensureCursor()
   onShowPeersChanged: ensureCursor()
   onShowExitNodesChanged: ensureCursor()
+  onShowTaildropChanged: ensureCursor()
+  onTaildropRowsChanged: ensureCursor()
   onFilteredMullvadRegionsChanged: ensureCursor()
 
   Service {
@@ -468,6 +522,7 @@ Panel {
         else if (t === "n" || t === "N") tailscale.copyPeerName(root.selectedPeer())
         else if (t === "d" || t === "D") tailscale.copyPeerDnsName(root.selectedPeer())
         else if (t === "s" || t === "S") root.sendPeerFile(root.selectedPeer())
+        else if (t === "g" || t === "G") root.saveWaitingFiles()
         else if (t === "a" || t === "A") root.openAdminConsole()
       }
 
@@ -769,6 +824,39 @@ Panel {
                   peer: modelData
                   rowIndex: index
                 }
+              }
+            }
+          }
+
+          PanelSeparator {
+            visible: root.showTaildrop
+            foreground: root.foreground
+          }
+
+          Column {
+            visible: root.showTaildrop
+            width: parent.width
+            spacing: Style.space(10)
+
+            PanelSectionHeader {
+              text: "TAILDROP"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(6)
+
+              AutoReceiveRow {
+                id: autoReceiveRow
+                visible: tailscale.receiveServiceAvailable
+                width: parent.width
+              }
+
+              SaveFilesRow {
+                id: saveFilesRow
+                width: parent.width
               }
             }
           }
@@ -1090,6 +1178,159 @@ Panel {
         root.focusSection = "admin"
       }
       onClicked: root.openAdminConsole()
+    }
+  }
+
+  // Omarchy's receiver empties the inbox into Downloads the moment a file
+  // lands, which leaves nothing for `tailscale file get` or the row below. The
+  // switch mirrors that user service and only changes it when flipped.
+  component AutoReceiveRow: CursorSurface {
+    id: autoReceiveRow
+
+    hasCursor: root.cursorActive && root.focusSection === "taildrop" && root.selectedTaildropRow === "autoReceive"
+    foreground: root.foreground
+    fill: root.hoverFill
+    currentFill: root.selectedFill
+
+    implicitHeight: autoReceiveInner.implicitHeight + Style.spacing.xl
+
+    RowLayout {
+      id: autoReceiveInner
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(6)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(8)
+
+      Text {
+        text: "󰇚"
+        color: tailscale.autoReceive ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        horizontalAlignment: Text.AlignHCenter
+        Layout.preferredWidth: Style.space(22)
+        Layout.alignment: Qt.AlignVCenter
+        opacity: tailscale.settingAutoReceive ? 0.45 : 1.0
+
+        SequentialAnimation on opacity {
+          running: tailscale.settingAutoReceive
+          NumberAnimation { to: 1.0; duration: 420; easing.type: Easing.InOutQuad }
+          NumberAnimation { to: 0.45; duration: 420; easing.type: Easing.InOutQuad }
+          loops: Animation.Infinite
+        }
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(2)
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: "Receive automatically"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          Layout.fillWidth: true
+          text: tailscale.autoReceive ? "Incoming files go straight to Downloads" : "Incoming files wait here until you save them"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          elide: Text.ElideRight
+        }
+      }
+
+      // The row owns the click, so the switch is presentation only.
+      ToggleSwitch {
+        checked: tailscale.autoReceive
+        interactive: false
+        foreground: root.foreground
+        Layout.alignment: Qt.AlignVCenter
+      }
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: root.setTaildropCursor("autoReceive")
+      onClicked: tailscale.toggleAutoReceive()
+    }
+  }
+
+  component SaveFilesRow: CursorSurface {
+    id: saveFilesRow
+    readonly property string detailText: {
+      if (tailscale.savingFiles) return "Saving…"
+      if (!tailscale.waitingFilesKnown) return "Pick a folder for the files in the inbox"
+      return tailscale.waitingFilesSummary
+    }
+
+    hasCursor: root.cursorActive && root.focusSection === "taildrop" && root.selectedTaildropRow === "save"
+    foreground: root.foreground
+    fill: root.hoverFill
+    currentFill: root.selectedFill
+
+    implicitHeight: saveFilesInner.implicitHeight + Style.spacing.xl
+
+    Row {
+      id: saveFilesInner
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(6)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(8)
+
+      Text {
+        text: "󰉍"
+        color: root.canSaveFiles ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        width: Style.space(22)
+        horizontalAlignment: Text.AlignHCenter
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Column {
+        width: parent.width - Style.space(22) - Style.space(8)
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(2)
+
+        Text {
+          textFormat: Text.PlainText
+          text: "Save waiting files…"
+          color: root.canSaveFiles ? root.foreground : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+          width: parent.width
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          text: saveFilesRow.detailText
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+          elide: Text.ElideRight
+          width: parent.width
+        }
+      }
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: root.canSaveFiles ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onEntered: root.setTaildropCursor("save")
+      onClicked: root.saveWaitingFiles()
     }
   }
 

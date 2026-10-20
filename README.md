@@ -28,6 +28,8 @@ tailnet with its Tailscale IP.
 - Switch between Tailscale accounts when more than one is available
 - Exit node selection, including Mullvad exit nodes
 - Send files with Taildrop, when the tailnet allows file sharing
+- **Taildrop** — save the files waiting in the inbox to a folder you pick, and
+  switch Omarchy's automatic receiving on or off
 
 ## Install
 
@@ -60,7 +62,9 @@ Widget settings are not stored in the plugin directory: the refresh interval and
 your recently used Mullvad exit nodes live in the bar layout in
 `~/.config/omarchy/shell.json`, the same place Omarchy keeps the settings of its
 own widgets. Removing the plugin takes its entry out of the bar; edit that file
-if you want to be sure nothing is left. The plugin writes nothing anywhere else.
+if you want to be sure nothing is left. The plugin writes nothing anywhere else;
+the one exception is the *Receive automatically* switch, which enables or
+disables Omarchy's `omarchy-tailscale-receive` user service when you flip it.
 
 > Plugins run as unsandboxed code inside the long-lived `omarchy-shell`
 > process. Read the source before enabling this, or any other plugin.
@@ -71,7 +75,8 @@ if you want to be sure nothing is left. The plugin writes nothing anywhere else.
 - `tailscale` CLI on `PATH`
 - `wl-copy` (`wl-clipboard`) for the copy actions
 - `xdg-open` for opening the admin console
-- Taildrop enabled on the tailnet, to send files
+- Taildrop enabled on the tailnet, to send and receive files
+- `omarchy-file-select` (part of Omarchy) for picking the folder to save into
 
 ## Keyboard shortcuts
 
@@ -85,6 +90,7 @@ With the panel open:
 | `n` | Copy the selected machine's name |
 | `d` | Copy the selected machine's DNS name |
 | `s` | Send files to the selected machine |
+| `g` | Save the waiting Taildrop files to a folder |
 | `a` | Open the Tailscale admin console |
 | `t` | Toggle Tailscale |
 | `r` | Refresh status |
@@ -105,11 +111,28 @@ qs -p /usr/share/omarchy/shell ipc call igor-alexandrov.tailscale adminConsole
 
 ## Receiving files
 
-Incoming Taildrop files are saved to `~/Downloads` by Omarchy's
-`omarchy-tailscale-receive` service, which announces each one with a
-notification. Enable it with `systemctl --user enable --now
-omarchy-tailscale-receive`, or run the same loop by hand with
-`omarchy tailscale receive`.
+Omarchy ships an `omarchy-tailscale-receive` user service, enabled by default,
+that moves every incoming Taildrop file to `~/Downloads` the moment it lands
+and announces it with a notification. While it runs, the inbox is always empty,
+so there is nothing left for `tailscale file get` to pick up.
+
+The **Taildrop** section of the panel puts that choice in your hands:
+
+- **Receive automatically** shows whether the service is on, and flipping it
+  runs `systemctl --user enable --now` or `disable --now` on it. The plugin
+  never changes the service by itself, so the switch stays where you leave it,
+  across reboots, and agrees with anything you do through `systemctl`.
+- **Save waiting files…** shows what is in the inbox, asks for a folder, and
+  moves the files there with `tailscale file get --conflict=rename`, so a
+  same-named file gets a numbered name instead of being overwritten. A
+  notification reports the result; click it to open the file or folder.
+
+With automatic receiving off, files wait in the inbox until you save them from
+the panel or with `tailscale file get <directory>` yourself. The section only
+appears when the tailnet allows Taildrop or files are already waiting. The
+inbox is listed with `tailscale debug --file get`, the only way the CLI offers
+to look without emptying it; if that ever fails, the save row stays usable and
+`tailscale file get` reports for itself.
 
 ## Development
 

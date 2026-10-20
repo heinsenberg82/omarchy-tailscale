@@ -305,6 +305,106 @@ function parseAccounts(raw) {
   }
 }
 
+// `tailscale debug --file get` prints the inbox as JSON, or `null` when it is
+// empty. Anything unparseable comes back as null rather than [], so the panel
+// can tell "nothing waiting" from "could not look".
+function parseWaitingFiles(raw) {
+  var text = String(raw || "").trim()
+  if (text === "") return null
+  try {
+    var parsed = JSON.parse(text)
+    if (parsed === null) return []
+    if (!Array.isArray(parsed)) return null
+    var files = []
+    for (var i = 0; i < parsed.length; i++) {
+      var entry = parsed[i] || {}
+      var name = String(entry.Name || "")
+      if (name === "") continue
+      files.push({ name: name, size: typeof entry.Size === "number" ? entry.Size : 0 })
+    }
+    return files
+  } catch (e) {
+    return null
+  }
+}
+
+function formatBytes(bytes) {
+  var value = typeof bytes === "number" && bytes > 0 ? bytes : 0
+  var units = ["B", "KB", "MB", "GB", "TB"]
+  var unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  var digits = unit === 0 || value >= 10 ? 0 : 1
+  return value.toFixed(digits) + " " + units[unit]
+}
+
+function waitingFilesSummary(files) {
+  var list = Array.isArray(files) ? files : []
+  if (list.length === 0) return "No files waiting"
+  var total = 0
+  for (var i = 0; i < list.length; i++) total += list[i].size || 0
+  var what = list.length === 1 ? list[0].name : list.length + " files"
+  return what + " · " + formatBytes(total)
+}
+
+// From `systemctl show -p LoadState -p ActiveState -p UnitFileState`. A unit
+// counts as on while it is either enabled or running: one that was started by
+// hand still empties the inbox, and one that crashed comes back next login.
+function parseUnitState(raw) {
+  var props = {}
+  var lines = String(raw || "").split(/\r?\n/)
+  for (var i = 0; i < lines.length; i++) {
+    var eq = lines[i].indexOf("=")
+    if (eq > 0) props[lines[i].substring(0, eq).trim()] = lines[i].substring(eq + 1).trim()
+  }
+  var fileState = String(props.UnitFileState || "")
+  var activeState = String(props.ActiveState || "")
+  return {
+    loaded: props.LoadState === "loaded",
+    enabled: fileState === "enabled" || fileState === "enabled-runtime",
+    active: activeState === "active" || activeState === "activating" || activeState === "reloading" || activeState === "refreshing"
+  }
+}
+
+// `tailscale file get --verbose` reports each file as
+// "wrote <name> as <path> (<n> bytes)". Either part can contain " as ", so
+// anchor on the directory the files were saved into.
+function parseSavedFiles(raw, dir) {
+  var prefix = " as " + String(dir || "").replace(/\/+$/, "") + "/"
+  var lines = String(raw || "").split(/\r?\n/)
+  var paths = []
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (line.indexOf("wrote ") !== 0) continue
+    var at = line.indexOf(prefix)
+    if (at === -1) continue
+    var path = line.substring(at + 4).replace(/ \(\d+ bytes\)\s*$/, "")
+    if (path !== "") paths.push(path)
+  }
+  return paths
+}
+
+function tildePath(path, home) {
+  var value = String(path || "")
+  var base = String(home || "").replace(/\/+$/, "")
+  if (base === "") return value
+  if (value === base) return "~"
+  return value.indexOf(base + "/") === 0 ? "~" + value.substring(base.length) : value
+}
+
+function savedFilesNotice(paths, dir, home) {
+  var list = Array.isArray(paths) ? paths : []
+  var where = "to " + tildePath(dir, home)
+  if (list.length === 0) return { headline: "No Taildrop files waiting", body: "Nothing was saved", open: "" }
+  if (list.length === 1) {
+    var name = String(list[0]).substring(String(list[0]).lastIndexOf("/") + 1)
+    return { headline: "Saved " + name, body: where, open: String(list[0]) }
+  }
+  return { headline: "Saved " + list.length + " files", body: where, open: String(dir || "") }
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     filterIPv4: filterIPv4,
@@ -323,6 +423,13 @@ if (typeof module !== "undefined") {
     mullvadRegionOptions: mullvadRegionOptions,
     mullvadCountryOptions: mullvadCountryOptions,
     parseStatus: parseStatus,
-    parseAccounts: parseAccounts
+    parseAccounts: parseAccounts,
+    parseWaitingFiles: parseWaitingFiles,
+    formatBytes: formatBytes,
+    waitingFilesSummary: waitingFilesSummary,
+    parseUnitState: parseUnitState,
+    parseSavedFiles: parseSavedFiles,
+    tildePath: tildePath,
+    savedFilesNotice: savedFilesNotice
   }
 }
